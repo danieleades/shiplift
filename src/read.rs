@@ -1,5 +1,5 @@
-use crate::errors::Error;
-use futures::{Async, Stream};
+use crate::Result;
+use futures::{Poll, Stream};
 use hyper::Chunk;
 use std::{
     cmp,
@@ -34,7 +34,7 @@ pub struct StreamReader<S> {
 
 impl<S> StreamReader<S>
 where
-    S: Stream<Item = Chunk, Error = Error>,
+    S: Stream<Item = Result<Chunk>>,
 {
     #[inline]
     pub fn new(stream: S) -> StreamReader<S> {
@@ -47,7 +47,7 @@ where
 
 impl<S> Read for StreamReader<S>
 where
-    S: Stream<Item = Chunk, Error = Error>,
+    S: Stream<Item = Result<Chunk>>,
 {
     fn read(
         &mut self,
@@ -79,17 +79,17 @@ where
                     match self.stream.poll() {
                         // Polling stream yielded a Chunk that can be read from.
                         //
-                        Ok(Async::Ready(Some(chunk))) => {
+                        Ok(Poll::Ready(Some(chunk))) => {
                             self.state = ReadState::Ready(chunk, 0);
 
                             continue;
                         }
                         // Polling stream yielded EOF.
                         //
-                        Ok(Async::Ready(None)) => return Ok(0),
+                        Ok(Poll::Ready(None)) => return Ok(0),
                         // Stream could not be read from.
                         //
-                        Ok(Async::NotReady) => return Err(io::ErrorKind::WouldBlock.into()),
+                        Ok(Poll::Pending) => return Err(io::ErrorKind::WouldBlock.into()),
                         Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e.to_string())),
                     }
                 }
@@ -102,4 +102,4 @@ where
     }
 }
 
-impl<S> AsyncRead for StreamReader<S> where S: Stream<Item = Chunk, Error = Error> {}
+impl<S> AsyncRead for StreamReader<S> where S: Stream<Item = Result<Chunk>> {}

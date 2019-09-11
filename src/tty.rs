@@ -1,10 +1,14 @@
-use crate::errors::Error;
+use crate::{Error, Result};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use bytes::BytesMut;
-use futures::{self, Async};
-use hyper::rt::{Future, Stream};
+use futures::task::Context;
 use log::trace;
-use std::io::{self, Cursor};
+use std::{
+    future::Future,
+    io::{self, Cursor},
+    pin::Pin,
+    task::Poll,
+};
 use tokio_codec::Decoder;
 use tokio_io::{AsyncRead, AsyncWrite};
 
@@ -24,12 +28,12 @@ pub enum StreamType {
 /// A multiplexed stream.
 pub struct Multiplexed {
     stdin: Box<dyn AsyncWrite>,
-    chunks: Box<dyn futures::Stream<Item = Chunk, Error = crate::Error>>,
+    chunks: Box<dyn futures::Stream<Item = Result<Chunk>>>,
 }
 
 pub struct MultiplexedBlocking {
     stdin: Box<dyn AsyncWrite>,
-    chunks: Box<dyn Iterator<Item = Result<Chunk, crate::Error>>>,
+    chunks: Box<dyn Iterator<Item = Result<Chunk>>>,
 }
 
 /// Represent the current state of the decoding of a TTY frame
@@ -77,13 +81,12 @@ impl Default for TtyDecoder {
 }
 
 impl Decoder for TtyDecoder {
-    type Item = Chunk;
-    type Error = Error;
+    type Item = Result<Chunk>;
 
     fn decode(
         &mut self,
         src: &mut BytesMut,
-    ) -> Result<Option<Self::Item>, Self::Error> {
+    ) -> Result<Option<Self::Item>> {
         loop {
             match self.state {
                 TtyDecoderState::WaitingHeader => {
@@ -168,18 +171,20 @@ impl Multiplexed {
 }
 
 impl futures::Stream for Multiplexed {
-    type Item = Chunk;
-    type Error = crate::Error;
+    type Item = Result<Chunk>;
 
-    fn poll(&mut self) -> Result<Async<Option<Chunk>>, crate::Error> {
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut Context,
+    ) -> Poll<Option<Self::Item>> {
         self.chunks.poll()
     }
 }
 
 impl Iterator for MultiplexedBlocking {
-    type Item = Result<Chunk, crate::Error>;
+    type Item = Result<Chunk>;
 
-    fn next(&mut self) -> Option<Result<Chunk, crate::Error>> {
+    fn next(&mut self) -> Option<Result<Chunk>> {
         self.chunks.next()
     }
 }
@@ -190,11 +195,11 @@ macro_rules! delegate_io_write {
             fn write(
                 &mut self,
                 buf: &[u8],
-            ) -> Result<usize, io::Error> {
+            ) -> std::result::Result<usize, io::Error> {
                 self.stdin.write(buf)
             }
 
-            fn flush(&mut self) -> Result<(), io::Error> {
+            fn flush(&mut self) -> std::result::Result<(), io::Error> {
                 self.stdin.flush()
             }
         }
@@ -204,7 +209,7 @@ macro_rules! delegate_io_write {
 delegate_io_write!(Multiplexed);
 delegate_io_write!(MultiplexedBlocking);
 
-pub fn chunks<S>(stream: S) -> impl futures::Stream<Item = Chunk, Error = crate::Error>
+pub fn chunks<S>(stream: S) -> impl futures::stream::Stream<Item = Result<Chunk>>
 where
     S: AsyncRead,
 {
@@ -221,7 +226,7 @@ where
                 n => panic!("invalid stream number from docker daemon: '{}'", n),
             };
 
-            ::tokio_io::io::read_exact(stream, vec![0; data_length as usize])
+            tokio::io::read_exact(stream, vec![0; data_length as usize])
                 .map(move |(stream, data)| (Chunk { stream_type, data }, stream))
         });
         // FIXME: when updated to futures 0.2, the future itself returns the Option((Chunk,
@@ -236,7 +241,8 @@ where
 }
 
 mod util {
-    use futures::{Async, Stream};
+    use futures::stream::Stream;
+    use std::task::Poll;
 
     pub struct StopOnError<S, F> {
         stream: S,
@@ -257,12 +263,14 @@ mod util {
     impl<S, F> Stream for StopOnError<S, F>
     where
         S: Stream,
-        F: FnMut(&S::Error) -> bool,
+        F: FnMut(&S::Item) -> bool,
     {
         type Item = S::Item;
-        type Error = S::Error;
 
-        fn poll(&mut self) -> Result<Async<Option<S::Item>>, S::Error> {
+        fn poll_next(
+            self: Pin<&mut Self>,
+            cx: &mut Context,
+        ) -> Poll<Option<S::Item>> {
             match self.stream.poll() {
                 Err(e) => {
                     if (self.f)(&e) {

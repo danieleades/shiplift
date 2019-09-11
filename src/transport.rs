@@ -1,10 +1,7 @@
 //! Transports for communicating with the docker daemon
 
 use crate::{Error, Result};
-use futures::{
-    future::{self, Either},
-    Future, IntoFuture, Stream,
-};
+use futures::stream::{Stream, StreamExt};
 use hyper::{
     client::{Client, HttpConnector},
     header, Body, Chunk, Method, Request, StatusCode,
@@ -15,7 +12,6 @@ use hyper_openssl::HttpsConnector;
 use hyperlocal::UnixConnector;
 #[cfg(feature = "unix-socket")]
 use hyperlocal::Uri as DomainUri;
-use log::debug;
 use mime::Mime;
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -66,24 +62,31 @@ impl fmt::Debug for Transport {
 
 impl Transport {
     /// Make a request and return the whole response in a `String`
-    pub fn request<B>(
+    pub async fn request<B>(
         &self,
         method: Method,
         endpoint: &str,
         body: Option<(B, Mime)>,
-    ) -> impl Future<Item = String, Error = Error>
+    ) -> Result<String>
     where
         B: Into<Body>,
     {
         let endpoint = endpoint.to_string();
-        self.stream_chunks(method, &endpoint, body, None::<iter::Empty<_>>)
-            .concat2()
-            .and_then(|v| {
-                String::from_utf8(v.to_vec())
-                    .map_err(Error::Encoding)
-                    .into_future()
-            })
-            .inspect(move |body| debug!("{} raw response: {}", endpoint, body))
+
+        let vec = Vec::new();
+
+        while let Some(piece) = self
+            .stream_chunks(method, &endpoint, body, None::<iter::Empty<_>>)
+            .next()
+            .await
+        {
+            match piece {
+                Ok(x) => vec.extend(x),
+                Err(e) => return Err(e),
+            }
+        }
+
+        String::from_utf8(vec).map_err(Error::Encoding)
     }
 
     /// Make a request and return a `Stream` of `Chunks` as they are returned.
@@ -93,7 +96,7 @@ impl Transport {
         endpoint: &str,
         body: Option<(B, Mime)>,
         headers: Option<H>,
-    ) -> impl Stream<Item = Chunk, Error = Error>
+    ) -> impl Stream<Item = Result<Chunk>>
     where
         B: Into<Body>,
         H: IntoIterator<Item = (&'static str, String)>,
@@ -191,7 +194,7 @@ impl Transport {
     fn send_request(
         &self,
         req: Request<hyper::Body>,
-    ) -> impl Future<Item = hyper::Response<Body>, Error = Error> {
+    ) -> Result<hyper::Response<Body>> {
         let req = match self {
             Transport::Tcp { ref client, .. } => client.request(req),
             #[cfg(feature = "tls")]
@@ -208,12 +211,12 @@ impl Transport {
     ///
     /// This method can be used for operations such as viewing
     /// docker container logs interactively.
-    pub fn stream_upgrade<B>(
+    pub async fn stream_upgrade<B>(
         &self,
         method: Method,
         endpoint: &str,
         body: Option<(B, Mime)>,
-    ) -> impl Future<Item = impl AsyncRead + AsyncWrite, Error = Error>
+    ) -> Result<impl AsyncRead + AsyncWrite>
     where
         B: Into<Body>,
     {
@@ -240,16 +243,17 @@ impl Transport {
             .and_then(|res| res.into_body().on_upgrade().from_err())
     }
 
-    pub fn stream_upgrade_multiplexed<B>(
+    pub async fn stream_upgrade_multiplexed<B>(
         &self,
         method: Method,
         endpoint: &str,
         body: Option<(B, Mime)>,
-    ) -> impl Future<Item = crate::tty::Multiplexed, Error = Error>
+    ) -> Result<crate::tty::Multiplexed>
     where
         B: Into<Body> + 'static,
     {
         self.stream_upgrade(method, endpoint, body)
+            .await
             .map(crate::tty::Multiplexed::new)
     }
 
