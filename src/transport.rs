@@ -144,6 +144,54 @@ impl Transport {
             .flatten_stream()
     }
 
+    pub async fn stream_chunks2<B, H>(
+        &self,
+        method: Method,
+        endpoint: &str,
+        body: Option<(B, Mime)>,
+        headers: Option<H>,
+    ) -> impl Stream<Item = Result<Chunk>>
+    where
+        B: Into<Body>,
+        H: IntoIterator<Item = (&'static str, String)>,
+    {
+        let request = self
+            .build_request(method, endpoint, body, headers, |_| ())
+            .expect("Failed to build request!");
+
+        let result = self.send_request(request).await?;
+
+        match result.status() {
+            // Success case: pass on the response
+            StatusCode::OK
+            | StatusCode::CREATED
+            | StatusCode::SWITCHING_PROTOCOLS
+            | StatusCode::NO_CONTENT => Ok(result),
+            _ => {
+                let vec = Vec::new();
+
+                while let Some(x) = result.into_body().next().await {
+                    match x {
+                        Err(e) => return Error::Hyper(e),
+                        Ok(characters) => vec.extend(characters),
+                    }
+                }
+
+                let string = String::from_utf8(vec).map_err(Error::Encoding);
+
+                Error::Fault {
+                    code: status,
+                    message: Self::get_error_message(&body).unwrap_or_else(|| {
+                        status
+                            .canonical_reason()
+                            .unwrap_or_else(|| "unknown error code")
+                            .to_owned()
+                    }),
+                }
+            }
+        }.into_body().map_err(Error::Hyper).flatten_stream()
+    }
+
     /// Builds an HTTP request.
     fn build_request<B, H>(
         &self,
@@ -191,7 +239,7 @@ impl Transport {
     }
 
     /// Send the given request to the docker daemon and return a Future of the response.
-    fn send_request(
+    async fn send_request(
         &self,
         req: Request<hyper::Body>,
     ) -> Result<hyper::Response<Body>> {
@@ -203,7 +251,7 @@ impl Transport {
             Transport::Unix { ref client, .. } => client.request(req),
         };
 
-        req.map_err(Error::Hyper)
+        req.await.map_err(Error::Hyper)
     }
 
     /// Makes an HTTP request, upgrading the connection to a TCP

@@ -241,8 +241,8 @@ where
 }
 
 mod util {
-    use futures::stream::Stream;
-    use std::task::Poll;
+    use futures::{stream::Stream, task::Context};
+    use std::{pin::Pin, task::Poll};
 
     pub struct StopOnError<S, F> {
         stream: S,
@@ -255,7 +255,7 @@ mod util {
     ) -> StopOnError<S, F>
     where
         S: Stream,
-        F: FnMut(&S::Error) -> bool,
+        F: FnMut(&S::Item) -> bool,
     {
         StopOnError { stream, f }
     }
@@ -276,7 +276,7 @@ mod util {
                     if (self.f)(&e) {
                         Err(e)
                     } else {
-                        Ok(Async::Ready(None))
+                        Ok(Poll::Ready(None))
                     }
                 }
                 a => a,
