@@ -184,7 +184,9 @@ impl Transport {
             }
             #[cfg(feature = "unix-socket")]
             Transport::Unix { ref path, .. } => {
-                let uri: hyper::Uri = DomainUri::new(&path, endpoint.as_ref()).into();
+                let uri : hyper::Uri = DomainUri::new(&path, endpoint.as_ref())
+                    .map(DomainUri::into)
+                    .map_err(|error| Error::from(http::Error::from(error)))?;
                 builder.method(method).uri(&uri.to_string())
             }
         };
