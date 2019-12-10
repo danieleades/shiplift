@@ -26,15 +26,14 @@ pub mod tty;
 
 mod tarball;
 
-pub use options::NetworkCreateOptions;
 use options::{BodyType, ShipliftOption};
+pub use options::{NetworkCreateOptions, VolumeCreateOptions};
 
 pub use crate::{
     builder::{
         BuildOptions, ContainerConnectionOptions, ContainerFilter, ContainerListOptions,
         ContainerOptions, EventsOptions, ExecContainerOptions, ImageFilter, ImageListOptions,
         LogsOptions, NetworkListOptions, PullOptions, RegistryAuth, RmContainerOptions, TagOptions,
-        VolumeCreateOptions,
     },
     errors::Error,
 };
@@ -496,10 +495,7 @@ impl<'a> Container<'a> {
     /// Wait until the container stops
     pub async fn wait(&self) -> Result<Exit> {
         self.docker
-            .post_json(
-                format!("/containers/{}/wait", self.id),
-                None,
-            )
+            .post_json(format!("/containers/{}/wait", self.id), None)
             .await
     }
 
@@ -542,10 +538,7 @@ impl<'a> Container<'a> {
 
         let Response { id } = self
             .docker
-            .post_json(
-                format!("/containers/{}/exec", self.id),
-                json_body,
-            )
+            .post_json(format!("/containers/{}/exec", self.id), json_body)
             .await?;
 
         Ok(id)
@@ -691,9 +684,7 @@ impl<'a> Containers<'a> {
             );
         }
 
-        self.docker
-            .post_json(&path.join("?"), json_body)
-            .await
+        self.docker.post_json(&path.join("?"), json_body).await
     }
 }
 
@@ -803,10 +794,7 @@ impl<'a, 'b> Network<'a, 'b> {
         let json_body = Some(BodyType::Json(body));
 
         self.docker
-            .post(
-                &format!("/networks/{}/{}", self.id, segment),
-                json_body,
-            )
+            .post(&format!("/networks/{}/{}", self.id, segment), json_body)
             .await?;
         Ok(())
     }
@@ -825,15 +813,9 @@ impl<'a> Volumes<'a> {
 
     pub async fn create(
         &self,
-        opts: &VolumeCreateOptions,
+        opts: VolumeCreateOptions<'_>,
     ) -> Result<VolumeCreateInfo> {
-        let body: Body = opts.serialize()?.into();
-        let body_type = BodyType::Json(body);
-        let path = vec!["/volumes/create".to_owned()];
-
-        self.docker
-            .post_json(&path.join("?"), Some(body_type))
-            .await
+        self.docker.handle_request(opts).await
     }
 
     /// Lists the docker volumes on the current docker host
@@ -1128,9 +1110,7 @@ impl Docker {
         &self,
         endpoint: &str,
     ) -> Result<Vec<u8>> {
-        self.transport
-            .request(Method::DELETE, endpoint, None)
-            .await
+        self.transport.request(Method::DELETE, endpoint, None).await
     }
 
     async fn delete_json<T: serde::de::DeserializeOwned>(

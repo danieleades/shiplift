@@ -1,7 +1,6 @@
 //! Transports for communicating with the docker daemon
 
-use crate::{Error, Result};
-use crate::options::BodyType;
+use crate::{options::BodyType, Error, Result};
 use futures_util::{
     io::{AsyncRead, AsyncWrite},
     stream::Stream,
@@ -76,8 +75,7 @@ impl Transport {
         method: Method,
         endpoint: impl AsRef<str>,
         body: Option<BodyType>,
-    ) -> Result<Vec<u8>>
-    {
+    ) -> Result<Vec<u8>> {
         let body = body.map(|body_type| match body_type {
             BodyType::Json(body) => (body, mime::APPLICATION_JSON),
             BodyType::Tar(body) => (body, "application/x-tar".parse::<Mime>().unwrap()),

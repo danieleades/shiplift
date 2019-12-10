@@ -1,5 +1,5 @@
-use shiplift::{builder::VolumeCreateOptions, Docker};
-use std::{collections::HashMap, env};
+use shiplift::{Docker, VolumeCreateOptions};
+use std::env;
 
 #[tokio::main]
 async fn main() {
@@ -10,15 +10,11 @@ async fn main() {
         .nth(1)
         .expect("You need to specify an volume name");
 
-    let mut labels = HashMap::new();
-    labels.insert("com.github.softprops", "shiplift");
-
     match volumes
         .create(
-            &VolumeCreateOptions::builder()
-                .name(volume_name.as_ref())
-                .labels(&labels)
-                .build(),
+            VolumeCreateOptions::default()
+                .name(&volume_name)
+                .label("com.github.softprops", "shiplift"),
         )
         .await
     {
