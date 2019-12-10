@@ -19,18 +19,22 @@
 
 pub mod builder;
 pub mod errors;
+pub mod options;
 pub mod rep;
 pub mod transport;
 pub mod tty;
 
 mod tarball;
 
+pub use options::NetworkCreateOptions;
+use options::{BodyType, ShipliftOption};
+
 pub use crate::{
     builder::{
         BuildOptions, ContainerConnectionOptions, ContainerFilter, ContainerListOptions,
         ContainerOptions, EventsOptions, ExecContainerOptions, ImageFilter, ImageListOptions,
-        LogsOptions, NetworkCreateOptions, NetworkListOptions, PullOptions, RegistryAuth,
-        RmContainerOptions, TagOptions, VolumeCreateOptions,
+        LogsOptions, NetworkListOptions, PullOptions, RegistryAuth, RmContainerOptions, TagOptions,
+        VolumeCreateOptions,
     },
     errors::Error,
 };
@@ -494,7 +498,7 @@ impl<'a> Container<'a> {
         self.docker
             .post_json(
                 format!("/containers/{}/wait", self.id),
-                Option::<(Body, Mime)>::None,
+                None,
             )
             .await
     }
@@ -534,11 +538,13 @@ impl<'a> Container<'a> {
 
         let body: Body = opts.serialize()?.into();
 
+        let json_body = Some(BodyType::Json(body));
+
         let Response { id } = self
             .docker
             .post_json(
-                &format!("/containers/{}/exec", self.id)[..],
-                Some((body, mime::APPLICATION_JSON)),
+                format!("/containers/{}/exec", self.id),
+                json_body,
             )
             .await?;
 
@@ -619,7 +625,7 @@ impl<'a> Container<'a> {
         .unwrap();
         let data = ar.into_inner().unwrap();
 
-        let body = Some((data, "application/x-tar".parse::<Mime>().unwrap()));
+        let tar_body = Some(BodyType::Tar(data.into()));
 
         let path_arg = form_urlencoded::Serializer::new(String::new())
             .append_pair("path", "/")
@@ -628,7 +634,7 @@ impl<'a> Container<'a> {
         self.docker
             .put(
                 &format!("/containers/{}/archive?{}", self.id, path_arg),
-                body.map(|(body, mime)| (body.into(), mime)),
+                tar_body,
             )
             .await?;
         Ok(())
@@ -674,6 +680,7 @@ impl<'a> Containers<'a> {
         opts: &ContainerOptions,
     ) -> Result<ContainerCreateInfo> {
         let body: Body = opts.serialize()?.into();
+        let json_body = Some(BodyType::Json(body));
         let mut path = vec!["/containers/create".to_owned()];
 
         if let Some(ref name) = opts.name {
@@ -685,7 +692,7 @@ impl<'a> Containers<'a> {
         }
 
         self.docker
-            .post_json(&path.join("?"), Some((body, mime::APPLICATION_JSON)))
+            .post_json(&path.join("?"), json_body)
             .await
     }
 }
@@ -724,14 +731,9 @@ impl<'a> Networks<'a> {
     /// Create a new Network instance
     pub async fn create(
         &self,
-        opts: &NetworkCreateOptions,
+        opts: NetworkCreateOptions<'_>,
     ) -> Result<NetworkCreateInfo> {
-        let body: Body = opts.serialize()?.into();
-        let path = vec!["/networks/create".to_owned()];
-
-        self.docker
-            .post_json(&path.join("?"), Some((body, mime::APPLICATION_JSON)))
-            .await
+        self.docker.handle_request(opts).await
     }
 }
 
@@ -798,11 +800,12 @@ impl<'a, 'b> Network<'a, 'b> {
         opts: &ContainerConnectionOptions,
     ) -> Result<()> {
         let body: Body = opts.serialize()?.into();
+        let json_body = Some(BodyType::Json(body));
 
         self.docker
             .post(
-                &format!("/networks/{}/{}", self.id, segment)[..],
-                Some((body, mime::APPLICATION_JSON)),
+                &format!("/networks/{}/{}", self.id, segment),
+                json_body,
             )
             .await?;
         Ok(())
@@ -825,10 +828,11 @@ impl<'a> Volumes<'a> {
         opts: &VolumeCreateOptions,
     ) -> Result<VolumeCreateInfo> {
         let body: Body = opts.serialize()?.into();
+        let body_type = BodyType::Json(body);
         let path = vec!["/volumes/create".to_owned()];
 
         self.docker
-            .post_json(&path.join("?"), Some((body, mime::APPLICATION_JSON)))
+            .post_json(&path.join("?"), Some(body_type))
             .await
     }
 
@@ -1026,7 +1030,9 @@ impl Docker {
 
     /// Returns a simple ping response indicating the docker daemon is accessible
     pub async fn ping(&self) -> Result<String> {
-        self.get("/_ping").await
+        let v = self.get("/_ping").await?;
+        let string = String::from_utf8(v)?;
+        Ok(string)
     }
 
     /// Returns a stream of docker events
@@ -1059,63 +1065,71 @@ impl Docker {
     // Utility functions to make requests
     //
 
+    async fn handle_request<T>(
+        &self,
+        opts: impl ShipliftOption,
+    ) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let raw_response = self
+            .transport
+            .request(opts.method(), opts.endpoint(), opts.body())
+            .await?;
+        Ok(serde_json::from_slice(&raw_response)?)
+    }
+
     async fn get(
         &self,
         endpoint: &str,
-    ) -> Result<String> {
-        self.transport
-            .request(Method::GET, endpoint, Option::<(Body, Mime)>::None)
-            .await
+    ) -> Result<Vec<u8>> {
+        self.transport.request(Method::GET, endpoint, None).await
     }
 
     async fn get_json<T: serde::de::DeserializeOwned>(
         &self,
         endpoint: &str,
     ) -> Result<T> {
-        let raw_string = self
-            .transport
-            .request(Method::GET, endpoint, Option::<(Body, Mime)>::None)
-            .await?;
+        let raw_response = self.transport.request(Method::GET, endpoint, None).await?;
 
-        Ok(serde_json::from_str::<T>(&raw_string)?)
+        Ok(serde_json::from_slice(&raw_response)?)
     }
 
     async fn post(
         &self,
         endpoint: &str,
-        body: Option<(Body, Mime)>,
-    ) -> Result<String> {
+        body: Option<BodyType>,
+    ) -> Result<Vec<u8>> {
         self.transport.request(Method::POST, endpoint, body).await
     }
 
     async fn put(
         &self,
         endpoint: &str,
-        body: Option<(Body, Mime)>,
-    ) -> Result<String> {
+        body: Option<BodyType>,
+    ) -> Result<Vec<u8>> {
         self.transport.request(Method::PUT, endpoint, body).await
     }
 
-    async fn post_json<T, B>(
+    async fn post_json<T>(
         &self,
         endpoint: impl AsRef<str>,
-        body: Option<(B, Mime)>,
+        body: Option<BodyType>,
     ) -> Result<T>
     where
         T: serde::de::DeserializeOwned,
-        B: Into<Body>,
     {
-        let string = self.transport.request(Method::POST, endpoint, body).await?;
+        let raw_response = self.transport.request(Method::POST, endpoint, body).await?;
 
-        Ok(serde_json::from_str::<T>(&string)?)
+        Ok(serde_json::from_slice(&raw_response)?)
     }
 
     async fn delete(
         &self,
         endpoint: &str,
-    ) -> Result<String> {
+    ) -> Result<Vec<u8>> {
         self.transport
-            .request(Method::DELETE, endpoint, Option::<(Body, Mime)>::None)
+            .request(Method::DELETE, endpoint, None)
             .await
     }
 
@@ -1123,12 +1137,12 @@ impl Docker {
         &self,
         endpoint: &str,
     ) -> Result<T> {
-        let string = self
+        let raw_response = self
             .transport
-            .request(Method::DELETE, endpoint, Option::<(Body, Mime)>::None)
+            .request(Method::DELETE, endpoint, None)
             .await?;
 
-        Ok(serde_json::from_str::<T>(&string)?)
+        Ok(serde_json::from_slice(&raw_response)?)
     }
 
     fn stream_post<'a, H>(

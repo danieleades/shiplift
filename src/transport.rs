@@ -1,6 +1,7 @@
 //! Transports for communicating with the docker daemon
 
 use crate::{Error, Result};
+use crate::options::BodyType;
 use futures_util::{
     io::{AsyncRead, AsyncWrite},
     stream::Stream,
@@ -70,23 +71,23 @@ impl fmt::Debug for Transport {
 
 impl Transport {
     /// Make a request and return the whole response in a `String`
-    pub async fn request<B>(
+    pub(crate) async fn request(
         &self,
         method: Method,
         endpoint: impl AsRef<str>,
-        body: Option<(B, Mime)>,
-    ) -> Result<String>
-    where
-        B: Into<Body>,
+        body: Option<BodyType>,
+    ) -> Result<Vec<u8>>
     {
+        let body = body.map(|body_type| match body_type {
+            BodyType::Json(body) => (body, mime::APPLICATION_JSON),
+            BodyType::Tar(body) => (body, "application/x-tar".parse::<Mime>().unwrap()),
+        });
         let chunk = self
             .stream_chunks(method, endpoint, body, None::<iter::Empty<_>>)
             .try_concat()
             .await?;
 
-        let string = String::from_utf8(chunk.to_vec())?;
-
-        Ok(string)
+        Ok(chunk.to_vec())
     }
 
     async fn get_body<B, H>(
