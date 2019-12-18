@@ -1,3 +1,4 @@
+#![feature(type_alias_impl_trait)]
 //! Shiplift is a multi-transport utility for maneuvering [docker](https://www.docker.com/) containers
 //!
 //! # examples
@@ -168,8 +169,8 @@ impl<'a> Images<'a> {
                     None::<iter::Empty<_>>,
                 );
 
-                let value_stream = chunk_stream.and_then(|chunk| {
-                    async move { serde_json::from_slice(&chunk).map_err(Error::from) }
+                let value_stream = chunk_stream.and_then(|chunk| async move {
+                    serde_json::from_slice(&chunk).map_err(Error::from)
                 });
 
                 Ok(value_stream)
@@ -267,8 +268,8 @@ impl<'a> Images<'a> {
                     None::<iter::Empty<_>>,
                 );
 
-                let value_stream = chunk_stream.and_then(|chunk| {
-                    async move { serde_json::from_slice(&chunk).map_err(Error::from) }
+                let value_stream = chunk_stream.and_then(|chunk| async move {
+                    serde_json::from_slice(&chunk).map_err(Error::from)
                 });
 
                 Ok(value_stream)
@@ -393,8 +394,8 @@ impl<'a> Container<'a> {
         Box::pin(
             futures_codec::FramedRead::new(reader, codec)
                 .map_err(Error::IO)
-                .and_then(|s: String| {
-                    async move { serde_json::from_str(&s).map_err(Error::SerdeJsonError) }
+                .and_then(|s: String| async move {
+                    serde_json::from_str(&s).map_err(Error::SerdeJsonError)
                 }),
         )
     }
@@ -1049,8 +1050,8 @@ impl Docker {
         Box::pin(
             futures_codec::FramedRead::new(reader, codec)
                 .map_err(Error::IO)
-                .and_then(|s: String| {
-                    async move { serde_json::from_str(&s).map_err(Error::SerdeJsonError) }
+                .and_then(|s: String| async move {
+                    serde_json::from_str(&s).map_err(Error::SerdeJsonError)
                 }),
         )
     }

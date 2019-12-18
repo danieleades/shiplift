@@ -1,71 +1,124 @@
 //! Transports for communicating with the docker daemon
 
 use crate::{Error, Result};
-use futures_util::{
-    io::{AsyncRead, AsyncWrite},
-    stream::Stream,
-    TryFutureExt, TryStreamExt,
-};
-use hyper::{
-    client::{Client, HttpConnector},
-    header, Body, Chunk, Method, Request, StatusCode,
-};
-#[cfg(feature = "tls")]
-use hyper_openssl::HttpsConnector;
-#[cfg(feature = "unix-socket")]
-use hyperlocal::UnixConnector;
-#[cfg(feature = "unix-socket")]
-use hyperlocal::Uri as DomainUri;
-use mime::Mime;
-use pin_project::pin_project;
-use serde::{Deserialize, Serialize};
-use serde_json;
-use std::{
-    fmt, io, iter,
-    pin::Pin,
-    task::{Context, Poll},
-};
 
-pub fn tar() -> Mime {
-    "application/tar".parse().unwrap()
+mod tcp;
+#[cfg(feature = "unix-socket")]
+mod uds;
+#[cfg(feature = "tls")]
+mod tls;
+
+mod response_ext;
+pub use response_ext::ResponseExt;
+
+pub trait InnerTransport {
+    fn uri(&self, endpoint: impl AsRef<str>) -> String;
+    fn send_request_inner(
+        &self,
+        req: hyper::Request<hyper::Body>,
+    ) -> hyper::client::ResponseFuture;
 }
 
-/// Transports are types which define the means of communication
+impl<T> Transport for T where T: Transport {}
+
+pub trait Transport: InnerTransport {
+    fn send_request(
+        &self,
+        endpoint: impl AsRef<str>,
+        method: hyper::Method,
+        body: Option<BodyType>,
+    ) -> hyper::client::ResponseFuture {
+        let headers = std::iter::empty();
+        self.send_request_with_headers(
+            endpoint, method, body, headers,
+        )
+    }
+
+    fn send_request_with_headers(
+        &self,
+        endpoint: impl AsRef<str>,
+        method: hyper::Method,
+        body: Option<BodyType>,
+        headers: impl IntoIterator<Item = (&'static str, String)>,
+    ) -> hyper::client::ResponseFuture {
+        let uri = self.uri(endpoint.as_ref());
+
+        let request = build_request(
+            uri,
+            method,
+            body,
+            headers,
+        );
+
+        self.send_request_inner(request)
+    }
+
+    fn send_request_upgraded(
+        &self,
+        endpoint: impl AsRef<str>,
+        method: hyper::Method,
+        body: Option<BodyType>,
+    ) -> Upgraded {
+        let response_future = self.send_request(endpoint, method, body);
+
+        upgrade_connection(response_future)
+    }
+}
+
+fn build_request(
+    uri: String,
+    method: hyper::Method,
+    body: Option<BodyType>,
+    headers: impl IntoIterator<Item = (&'static str, String)>,
+) -> hyper::Request<hyper::Body> {
+    unimplemented!()
+}
+
+type Upgraded = impl std::future::Future<Output = Result<impl tokio::io::AsyncRead + tokio::io::AsyncWrite + ?Sized>>;
+
+async fn upgrade_connection(response_future: hyper::client::ResponseFuture) -> Result<impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Sized> {
+    let response = response_future.await?;
+
+    match response.status() {
+        hyper::StatusCode::SWITCHING_PROTOCOLS => Ok(response.into_body().on_upgrade().await?),
+        _ => Err(Error::ConnectionNotUpgraded),
+    }
+}
+
+pub enum BodyType {
+    Json(Vec<u8>),
+    Tar(Vec<u8>),
+}
+
+impl BodyType {
+    fn json(data: Vec<u8>) -> Self {
+        Self::Json(data)
+    }
+
+    fn tar(data: Vec<u8>) -> Self {
+        Self::Tar(data)
+    }
+
+    fn mime(&self) -> String {
+        match self {
+            Self::Json(_) => mime::APPLICATION_JSON.to_string(),
+            Self::Tar(_) => "application/x-tar".to_string(),
+        }
+    }
+}
+
+/* /// Transports are types which define the means of communication
 /// with the docker daemon
 #[derive(Clone)]
 pub enum Transport {
     /// A network tcp interface
-    Tcp {
-        client: Client<HttpConnector>,
-        host: String,
-    },
+    Tcp(tcp::Transport),
     /// TCP/TLS
     #[cfg(feature = "tls")]
-    EncryptedTcp {
-        client: Client<HttpsConnector<HttpConnector>>,
-        host: String,
-    },
+    EncryptedTcp(tls::Transport),
     /// A Unix domain socket
     #[cfg(feature = "unix-socket")]
-    Unix {
-        client: Client<UnixConnector>,
-        path: String,
-    },
-}
-
-impl fmt::Debug for Transport {
-    fn fmt(
-        &self,
-        f: &mut fmt::Formatter,
-    ) -> fmt::Result {
-        match *self {
-            Transport::Tcp { ref host, .. } => write!(f, "Tcp({})", host),
-            #[cfg(feature = "tls")]
-            Transport::EncryptedTcp { ref host, .. } => write!(f, "EncryptedTcp({})", host),
-            #[cfg(feature = "unix-socket")]
-            Transport::Unix { ref path, .. } => write!(f, "Unix({})", path),
-        }
-    }
+    Unix(uds::Transport),
 }
 
 impl Transport {
@@ -79,12 +132,12 @@ impl Transport {
     where
         B: Into<Body>,
     {
-        let chunk = self
-            .stream_chunks(method, endpoint, body, None::<iter::Empty<_>>)
-            .try_concat()
+        let body = self
+            .get_body(method, endpoint, body, None::<iter::Empty<_>>)
             .await?;
+        let bytes = concat_chunks(body).await?;
 
-        let string = String::from_utf8(chunk.to_vec())?;
+        let string = String::from_utf8(bytes)?;
 
         Ok(string)
     }
@@ -116,9 +169,9 @@ impl Transport {
             | StatusCode::NO_CONTENT => Ok(response.into_body()),
             // Error case: parse the text
             _ => {
-                let chunk = concat_chunks(response.into_body()).await?;
+                let bytes = concat_chunks(response.into_body()).await?;
 
-                let message_body = String::from_utf8(chunk.into_bytes().into_iter().collect())?;
+                let message_body = String::from_utf8(bytes)?;
 
                 Err(Error::Fault {
                     code: status,
@@ -133,13 +186,13 @@ impl Transport {
         }
     }
 
-    pub fn stream_chunks<'a, H, B>(
+    pub fn stream_bytes<'a, H, B>(
         &'a self,
         method: Method,
         endpoint: impl AsRef<str> + 'a,
         body: Option<(B, Mime)>,
         headers: Option<H>,
-    ) -> impl Stream<Item = Result<Chunk>> + 'a
+    ) -> impl Stream<Item = Result<Bytes>> + 'a
     where
         H: IntoIterator<Item = (&'static str, String)> + 'a,
         B: Into<Body> + 'a,
@@ -277,6 +330,21 @@ impl Transport {
     }
 }
 
+impl fmt::Debug for Transport {
+    fn fmt(
+        &self,
+        f: &mut fmt::Formatter,
+    ) -> fmt::Result {
+        match *self {
+            Transport::Tcp { ref host, .. } => write!(f, "Tcp({})", host),
+            #[cfg(feature = "tls")]
+            Transport::EncryptedTcp { ref host, .. } => write!(f, "EncryptedTcp({})", host),
+            #[cfg(feature = "unix-socket")]
+            Transport::Unix { ref path, .. } => write!(f, "Unix({})", path),
+        }
+    }
+}
+
 #[pin_project]
 struct Compat<S> {
     #[pin]
@@ -285,7 +353,7 @@ struct Compat<S> {
 
 impl<S> AsyncRead for Compat<S>
 where
-    S: tokio_io::AsyncRead,
+    S: tokio::io::AsyncRead,
 {
     fn poll_read(
         self: Pin<&mut Self>,
@@ -298,7 +366,7 @@ where
 
 impl<S> AsyncWrite for Compat<S>
 where
-    S: tokio_io::AsyncWrite,
+    S: tokio::io::AsyncWrite,
 {
     fn poll_write(
         self: Pin<&mut Self>,
@@ -326,8 +394,8 @@ struct ErrorResponse {
     message: String,
 }
 
-fn stream_body(body: Body) -> impl Stream<Item = Result<Chunk>> {
-    async fn unfold(mut body: Body) -> Option<(Result<Chunk>, Body)> {
+fn stream_body(body: Body) -> impl Stream<Item = Result<Bytes>> {
+    async fn unfold(mut body: Body) -> Option<(Result<Bytes>, Body)> {
         let chunk_result = body.next().await?.map_err(Error::from);
 
         Some((chunk_result, body))
@@ -336,6 +404,12 @@ fn stream_body(body: Body) -> impl Stream<Item = Result<Chunk>> {
     futures_util::stream::unfold(body, unfold)
 }
 
-async fn concat_chunks(body: Body) -> Result<Chunk> {
-    stream_body(body).try_concat().await
+async fn concat_chunks(body: Body) -> Result<Vec<u8>> {
+    let mut v = Vec::default();
+    while let Some(bytes_result) = body.next().await {
+        let bytes = bytes_result?;
+        v.extend(bytes);
+    }
+    Ok(v)
 }
+ */
