@@ -114,6 +114,7 @@ impl Transport {
             | StatusCode::CREATED
             | StatusCode::SWITCHING_PROTOCOLS
             | StatusCode::NO_CONTENT => Ok(response.into_body()),
+            // Error case: parse the text
             _ => {
                 let chunk = concat_chunks(response.into_body()).await?;
 
@@ -132,22 +133,6 @@ impl Transport {
         }
     }
 
-    async fn get_chunk_stream<B, H>(
-        &self,
-        method: Method,
-        endpoint: impl AsRef<str>,
-        body: Option<(B, Mime)>,
-        headers: Option<H>,
-    ) -> Result<impl Stream<Item = Result<Chunk>>>
-    where
-        B: Into<Body>,
-        H: IntoIterator<Item = (&'static str, String)>,
-    {
-        let body = self.get_body(method, endpoint, body, headers).await?;
-
-        Ok(stream_body(body))
-    }
-
     pub fn stream_chunks<'a, H, B>(
         &'a self,
         method: Method,
@@ -159,8 +144,12 @@ impl Transport {
         H: IntoIterator<Item = (&'static str, String)> + 'a,
         B: Into<Body> + 'a,
     {
-        self.get_chunk_stream(method, endpoint, body, headers)
-            .try_flatten_stream()
+        async move {
+            let body = self.get_body(method, endpoint, body, headers).await?;
+
+            Ok(stream_body(body))
+        }
+        .try_flatten_stream()
     }
 
     /// Builds an HTTP request.
