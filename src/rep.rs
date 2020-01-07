@@ -434,13 +434,6 @@ pub struct Info {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-pub struct ContainerCreateInfo {
-    pub id: String,
-    pub warnings: Option<Vec<String>>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
 pub struct History {
     pub id: String,
     #[cfg(feature = "chrono")]
@@ -493,34 +486,6 @@ pub struct Actor {
 pub enum Status {
     Untagged(String),
     Deleted(String),
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub struct VolumeCreateInfo {
-    pub name: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub struct Volumes {
-    pub volumes: Option<Vec<Volume>>,
-    pub warnings: Option<Vec<String>>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub struct Volume {
-    #[cfg(feature = "chrono")]
-    pub created_at: DateTime<Utc>,
-    #[cfg(not(feature = "chrono"))]
-    pub created_at: String,
-    pub driver: String,
-    pub labels: Option<HashMap<String, String>>,
-    pub name: String,
-    pub mountpoint: String,
-    pub options: Option<HashMap<String, String>>,
-    pub scope: String,
 }
 
 #[cfg(feature = "chrono")]

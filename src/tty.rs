@@ -1,7 +1,7 @@
 //! Types for working with docker TTY streams
 
 use crate::{Error, Result};
-use bytes::{BigEndian, ByteOrder};
+use byteorder::{BigEndian, ByteOrder};
 use futures_util::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite},
     stream::{Stream, TryStreamExt},
@@ -83,10 +83,9 @@ where
 
 pub(crate) fn decode<S>(hyper_chunk_stream: S) -> impl Stream<Item = Result<TtyChunk>>
 where
-    S: Stream<Item = Result<hyper::Chunk>> + Unpin,
+    S: Stream<Item = Result<Vec<u8>>>,
 {
-    let stream = hyper_chunk_stream
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    let stream = Box::pin(hyper_chunk_stream.map_err(|e| io::Error::new(io::ErrorKind::Other, e)))
         .into_async_read();
 
     futures_util::stream::unfold(stream, decode_chunk)
