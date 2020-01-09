@@ -1,7 +1,7 @@
 pub mod create {
 
     use super::super::rep;
-    use crate::{http_client::HttpClient, IntoFuture, Result};
+    use crate::{http_client::HttpClient, Result};
     use serde::Serialize;
     use std::collections::HashMap;
 
@@ -42,16 +42,13 @@ pub mod create {
             }
             self
         }
-    }
 
-    impl<'a> IntoFuture for Builder<'a> {
-        type Output = Result<rep::CreateInfo>;
-        type Future = impl std::future::Future<Output = Self::Output> + 'a;
-        fn into_future(self) -> Self::Future {
+        pub async fn send(self) -> Result<rep::CreateInfo> {
             self.http_client
                 .post("/volumes/create")
                 .json_body(self.body)
                 .into_json()
+                .await
         }
     }
 

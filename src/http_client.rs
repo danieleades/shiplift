@@ -9,8 +9,6 @@ use transport::Transport;
 mod request;
 use request::RequestBuilder;
 
-mod compat;
-
 pub(crate) enum HttpClient {
     Tcp(transport::Tcp),
     Tls(transport::Tls),

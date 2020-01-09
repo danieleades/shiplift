@@ -111,7 +111,7 @@ impl<'a> Container<'a> {
 
         let stream = self.http_client.get(&path).into_stream();
 
-        tty::decode(stream)
+        tty::decode_chunks(stream)
     }
 
     /// Attaches a multiplexed TCP stream to the container that can be used to read Stdout, Stderr and write Stdin.
@@ -128,7 +128,7 @@ impl<'a> Container<'a> {
             .await
     }
 
-    /// Attaches a `[TtyMultiplexer]` to the container.
+    /*     /// Attaches a `[TtyMultiplexer]` to the container.
     ///
     /// The `[TtyMultiplexer]` implements Stream for returning Stdout and Stderr chunks. It also implements `[AsyncWrite]` for writing to Stdin.
     ///
@@ -137,7 +137,7 @@ impl<'a> Container<'a> {
         let tcp_stream = self.attach_raw().await?;
 
         Ok(tty::Multiplexer::new(tcp_stream))
-    }
+    } */
 
     /// Returns a set of changes made to the container instance
     pub async fn changes(&self) -> Result<Vec<rep::Change>> {
@@ -341,7 +341,7 @@ impl<'a> Container<'a> {
             .json_body(())
             .into_stream();
 
-        tty::decode(stream)
+        tty::decode_chunks(stream)
     }
 
     pub fn exec(

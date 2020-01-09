@@ -6,6 +6,9 @@ use serde_json::Error as SerdeError;
 use std::{error::Error as StdError, fmt, io::Error as IoError, string::FromUtf8Error};
 use tokio_util::codec::{LengthDelimitedCodecError, LinesCodecError};
 
+/// Represents the result of all docker operations
+pub type Result<T> = std::result::Result<T, Error>;
+
 #[derive(Debug)]
 pub enum Error {
     SerdeJsonError(SerdeError),

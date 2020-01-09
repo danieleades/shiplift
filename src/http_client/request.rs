@@ -1,11 +1,15 @@
-use super::{compat::Compat, BodyType, HttpClient};
-use crate::{Error, Result};
+use super::{BodyType, HttpClient};
+use crate::{Compat, Error, Result};
 use futures_util::{
     future::TryFutureExt,
     io::{AsyncRead, AsyncWrite},
     stream::{Stream, StreamExt, TryStreamExt},
 };
-use hyper::{header::IntoHeaderName, Body, Method, Request, StatusCode};
+use hyper::{
+    body::{to_bytes, Bytes},
+    header::IntoHeaderName,
+    Body, Method, Request, StatusCode,
+};
 use serde::{Deserialize, Serialize};
 use std::{convert::TryFrom, io};
 use tokio_util::codec::{Decoder, FramedRead};
@@ -158,21 +162,21 @@ impl<'a> RequestBuilder<'a> {
         }
     }
 
-    async fn into_vec(self) -> Result<Vec<u8>> {
+    async fn into_bytes(self) -> Result<Bytes> {
         let body = self.into_body().await?;
-        concat(body).await
+        Ok(to_bytes(body).await?)
     }
 
     pub async fn into_string(self) -> Result<String> {
-        let bytes = self.into_vec().await?;
-        Ok(String::from_utf8(bytes)?)
+        let bytes = self.into_bytes().await?;
+        Ok(String::from_utf8(bytes.to_vec())?)
     }
 
     pub async fn into_json<T>(self) -> Result<T>
     where
         for<'de> T: Deserialize<'de>,
     {
-        let bytes = self.into_vec().await?;
+        let bytes = self.into_bytes().await?;
         Ok(serde_json::from_slice(&bytes)?)
     }
 

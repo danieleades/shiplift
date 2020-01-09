@@ -1,24 +1,45 @@
 use crate::{http_client::HttpClient, Result};
 use serde::Serialize;
+use futures_util::future::BoxFuture;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::Context;
+use std::task::Poll;
 
 pub struct Builder<'a> {
     http_client: &'a HttpClient,
     query: Query,
+    future: Option<BoxFuture<'a, Result<Vec<rep::Container>>>>,
 }
+
+type Response = Result<Vec<rep::Container>>;
 
 impl<'a> Builder<'a> {
     pub(crate) fn new(http_client: &'a HttpClient) -> Self {
         let query = Query::default();
+        let future = None;
 
-        Self { http_client, query }
+        Self { http_client, query, future }
     }
+}
 
-    pub async fn send(self) -> Result<Vec<rep::Container>> {
-        self.http_client
+impl<'a> Future for Builder<'a> {
+    type Output = Response;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // Construct a future once, and store it internally.
+        if self.future.is_none() {
+            self.future = Some(Box::pin(
+                self.http_client
             .get("/containers/json")
-            .query(self.query)
+            .query(&self.query)
             .into_json()
-            .await
+            ))
+        }
+
+        // Now that we have an inner future, we can forward all poll calls to
+        // it until it resolves.
+        self.future.as_mut().unwrap().as_mut().poll(cx)
     }
 }
 

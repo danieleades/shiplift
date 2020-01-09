@@ -7,7 +7,8 @@ use futures_util::{
 use serde_json::Value as JsonValue;
 use std::{path::Path, sync::Arc};
 
-mod requests;
+mod build;
+pub use build::Request as Build;
 
 /// Interface for docker images
 pub struct Images {
@@ -24,8 +25,8 @@ impl Images {
     pub fn build<'a>(
         &'a self,
         path: &'a Path,
-    ) -> requests::Build<'a> {
-        requests::Build::new(&self.http_client, path)
+    ) -> Build<'a> {
+        Build::new(&self.http_client, path)
     }
 
     /// Lists the docker images on the current docker host
@@ -101,11 +102,11 @@ impl Images {
     /// source can be uncompressed on compressed via gzip, bzip2 or xz
     pub fn import<'a>(
         &'a self,
-        mut tarball: impl AsyncRead + Unpin + 'a,
+        mut tarball: impl AsyncRead + 'a,
     ) -> impl Stream<Item = Result<JsonValue>> + 'a {
         async move {
             let mut bytes = Vec::default();
-            tarball.read_to_end(&mut bytes).await?;
+            Box::pin(tarball).read_to_end(&mut bytes).await?;
 
             Ok(self
                 .http_client

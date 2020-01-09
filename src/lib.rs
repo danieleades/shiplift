@@ -1,5 +1,5 @@
 #![feature(type_alias_impl_trait)]
-#![feature(into_future)]
+//#![feature(into_future)]
 //! Shiplift is a multi-transport utility for maneuvering [docker](https://www.docker.com/) containers
 //!
 //! # examples
@@ -21,14 +21,11 @@
 
 pub mod builder;
 mod errors;
-pub use errors::Error;
-mod clients;
+pub use errors::{Error, Result};
+pub mod clients;
+pub use clients::Docker;
+mod compat;
 mod http_client;
-mod into_future;
 pub mod rep;
-mod tarball;
 pub mod tty;
-pub use into_future::IntoFuture;
-
-/// Represents the result of all docker operations
-pub type Result<T> = std::result::Result<T, Error>;
+use compat::Compat;
