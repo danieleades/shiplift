@@ -1,4 +1,4 @@
-use crate::{builder, http_client::HttpClient, rep, tty, Result};
+use crate::{http_client::HttpClient, tty, Result};
 use futures_util::{
     future::TryFutureExt,
     io::{AsyncRead, AsyncWrite},
@@ -8,8 +8,9 @@ use std::{path::Path, sync::Arc};
 
 mod requests;
 mod types;
+pub use types::*;
 
-use requests::{Create, Kill, List, Restart, Start, Stop};
+pub use requests::{Create, Kill, List, Restart, Start, Stop};
 
 /// Interface for docker containers
 pub struct Containers {
@@ -77,7 +78,7 @@ impl<'a> Container<'a> {
     }
 
     /// Inspects the current docker container instance's details
-    pub async fn inspect(&self) -> Result<rep::ContainerDetails> {
+    pub async fn inspect(&self) -> Result<types::ContainerDetails> {
         self.http_client
             .get(&format!("/containers/{}/json", self.id()))
             .into_json()
@@ -88,7 +89,7 @@ impl<'a> Container<'a> {
     pub async fn top(
         &self,
         psargs: Option<&str>,
-    ) -> Result<rep::Top> {
+    ) -> Result<types::Top> {
         let endpoint = format!("/containers/{}/top", self.id());
         let mut request = self.http_client.get(&endpoint);
 
@@ -99,7 +100,7 @@ impl<'a> Container<'a> {
         request.into_json().await
     }
 
-    /// Returns a stream of logs emitted but the container instance
+/*     /// Returns a stream of logs emitted but the container instance
     pub fn logs(
         &'a self,
         opts: &builder::LogsOptions,
@@ -112,7 +113,7 @@ impl<'a> Container<'a> {
         let stream = self.http_client.get(&path).into_stream();
 
         tty::decode_chunks(stream)
-    }
+    } */
 
     /// Attaches a multiplexed TCP stream to the container that can be used to read Stdout, Stderr and write Stdin.
     async fn attach_raw(&self) -> Result<impl AsyncRead + AsyncWrite + 'a> {
@@ -140,7 +141,7 @@ impl<'a> Container<'a> {
     } */
 
     /// Returns a set of changes made to the container instance
-    pub async fn changes(&self) -> Result<Vec<rep::Change>> {
+    pub async fn changes(&self) -> Result<Vec<types::Change>> {
         self.http_client
             .get(&format!("/containers/{}/changes", self.id))
             .into_json()
@@ -155,7 +156,7 @@ impl<'a> Container<'a> {
     }
 
     /// Returns a stream of stats specific to this container instance
-    pub fn stats(&'a self) -> impl Stream<Item = Result<rep::Stats>> + 'a {
+    pub fn stats(&'a self) -> impl Stream<Item = Result<types::Stats>> + 'a {
         let codec = tokio_util::codec::LinesCodec::new();
 
         self.http_client
@@ -273,7 +274,7 @@ impl<'a> Container<'a> {
     }
 
     /// Wait until the container stops
-    pub async fn wait(&self) -> Result<rep::Exit> {
+    pub async fn wait(&self) -> Result<types::Exit> {
         self.http_client
             .post(&format!("/containers/{}/wait", self.id))
             .into_json()
@@ -333,7 +334,7 @@ impl<'a> Container<'a> {
         &'a self,
         id: String,
     ) -> impl Stream<Item = Result<tty::TtyChunk>> + 'a {
-        let bytes: &[u8] = b"{}";
+        let _bytes: &[u8] = b"{}";
 
         let stream = self
             .http_client

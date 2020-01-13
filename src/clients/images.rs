@@ -102,7 +102,7 @@ impl Images {
     /// source can be uncompressed on compressed via gzip, bzip2 or xz
     pub fn import<'a>(
         &'a self,
-        mut tarball: impl AsyncRead + 'a,
+        tarball: impl AsyncRead + 'a,
     ) -> impl Stream<Item = Result<JsonValue>> + 'a {
         async move {
             let mut bytes = Vec::default();

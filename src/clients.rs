@@ -1,14 +1,18 @@
+//! Various docker clients
+//! 
+//! There are separate clients for different Docker interfaces
+
 mod docker;
 pub use docker::Docker;
 
-mod containers;
+pub mod containers;
 pub use containers::{Container, Containers};
 
-mod images;
+pub mod images;
 pub use images::{Image, Images};
 
-mod volumes;
+pub mod volumes;
 pub use volumes::{Volume, Volumes};
 
-mod networks;
+pub mod networks;
 pub use networks::{Network, Networks};

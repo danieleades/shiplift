@@ -241,12 +241,12 @@ async fn concat(mut body: hyper::Body) -> Result<Vec<u8>> {
     Ok(v)
 }
 
-fn get_error_message(bytes: &Vec<u8>) -> Result<String> {
+fn get_error_message(bytes: impl AsRef<[u8]>) -> Result<String> {
     #[derive(Serialize, Deserialize)]
     struct ErrorResponse {
         message: String,
     }
 
-    let error_response: ErrorResponse = serde_json::from_slice(bytes)?;
+    let error_response: ErrorResponse = serde_json::from_slice(bytes.as_ref())?;
     Ok(error_response.message)
 }

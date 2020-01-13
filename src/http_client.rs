@@ -1,7 +1,7 @@
 //! Transports for communicating with the docker daemon
 
 use hyper::Method;
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf};
 
 mod transport;
 use transport::Transport;
@@ -33,28 +33,28 @@ impl HttpClient {
         Self::Tls(transport)
     }
 
-    pub fn request<'a>(
-        &'a self,
+    pub fn request(
+        &self,
         endpoint: impl AsRef<str>,
-    ) -> RequestBuilder<'a> {
+    ) -> RequestBuilder {
         RequestBuilder::new(self, endpoint)
     }
-    pub fn get<'a>(
-        &'a self,
+    pub fn get(
+        &self,
         endpoint: impl AsRef<str>,
-    ) -> RequestBuilder<'a> {
+    ) -> RequestBuilder {
         RequestBuilder::new(self, endpoint).method(Method::GET)
     }
-    pub fn post<'a>(
-        &'a self,
+    pub fn post(
+        &self,
         endpoint: impl AsRef<str>,
-    ) -> RequestBuilder<'a> {
+    ) -> RequestBuilder {
         RequestBuilder::new(self, endpoint).method(Method::POST)
     }
-    pub fn put<'a>(
-        &'a self,
+    pub fn put(
+        &self,
         endpoint: impl AsRef<str>,
-    ) -> RequestBuilder<'a> {
+    ) -> RequestBuilder {
         RequestBuilder::new(&self, endpoint).method(Method::PUT)
     }
     pub fn delete<'a>(

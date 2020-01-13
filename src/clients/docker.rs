@@ -49,7 +49,7 @@ impl Docker {
 
     /// constructs a new Docker instance for docker host listening at the given host url
     pub fn host(host: Uri) -> Docker {
-        let tcp_host_str = format!(
+        let _tcp_host_str = format!(
             "{}://{}:{}",
             host.scheme_str().unwrap(),
             host.host().unwrap().to_owned(),

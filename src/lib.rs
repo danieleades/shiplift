@@ -19,13 +19,11 @@
 //! # };
 //! ```
 
-pub mod builder;
 mod errors;
 pub use errors::{Error, Result};
 pub mod clients;
 pub use clients::Docker;
 mod compat;
 mod http_client;
-pub mod rep;
 pub mod tty;
 use compat::Compat;
